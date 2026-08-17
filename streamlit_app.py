@@ -19,6 +19,10 @@ import oddsfinder as of
 
 st.set_page_config(page_title="MLB Bet Finder", page_icon="⚾", layout="wide")
 
+# Bump this whenever you push a change - it shows in the caption so you can tell from your
+# phone whether Streamlit Cloud has redeployed the latest code.
+APP_VERSION = "v3 · ProgressColumn"
+
 
 def _secret(name, default=""):
     """Read a Streamlit secret, tolerating the case where no secrets file exists (local run)."""
@@ -44,7 +48,7 @@ if _pw:
         st.stop()
 
 st.title("⚾ MLB Bet Finder")
-st.caption("Novig value spots vs. the market consensus — back the side on Novig where Novig beats the field.")
+st.caption(f"Novig value spots vs. the market consensus — back the side on Novig where Novig beats the field.  ·  build **{APP_VERSION}**")
 
 if not of.API_KEY or of.API_KEY == "YOUR_API_KEY_HERE":
     st.error("No API key configured. Add ODDS_API_KEY in the app's Secrets (or ODDS_API_KEY env var locally).")
