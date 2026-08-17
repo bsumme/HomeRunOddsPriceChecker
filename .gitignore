@@ -1,0 +1,17 @@
+# --- secrets / local config (NEVER commit) ---
+notes
+.claude/
+.streamlit/secrets.toml
+*.env
+.env
+
+# --- generated output ---
+*.csv
+*_report.html
+hr_report.html
+
+# --- python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
