@@ -270,6 +270,12 @@ def extract_edges(cfg, event_data, verbose=False):
             # the hedge books (DK/FanDuel).
             opp_label = opposite_label(label)
             novig_opp_price = novig_lines.get(opp_label) if opp_label else None
+            # Novig "hold" = the exchange's implied margin on this two-sided market
+            # (implied prob of both sides minus 1). A free proxy for how tight/liquid the
+            # market is: low/negative = tight & active, high = thin. NOT dollar depth.
+            p_side = implied_prob(novig_price)
+            p_opp = implied_prob(novig_opp_price)
+            novig_hold = (p_side + p_opp - 1) if (p_side is not None and p_opp is not None) else None
             hedge_book, hedge_price = None, None
             if opp_label:
                 cands = [
@@ -287,6 +293,7 @@ def extract_edges(cfg, event_data, verbose=False):
                 "side": side,
                 "novig_price": novig_price,
                 "novig_opp_price": novig_opp_price,
+                "novig_hold": novig_hold,
                 "market_best_book": market_best_book,
                 "market_best_price": market_best_price,
                 "market_consensus_price": consensus_price,
@@ -382,7 +389,7 @@ def write_edges_csv(edges, cfg):
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
     path = f"novig_{cfg.slug}_edges_{stamp}.csv"
     fieldnames = [
-        "game", "player", "label", "side", "novig_price", "novig_opp_price",
+        "game", "player", "label", "side", "novig_price", "novig_opp_price", "novig_hold",
         "market_consensus_price", "market_best_book", "market_best_price",
         "edge_pct", "edge_vs_consensus", "n_books_better", "n_other_books",
         "hedge_book", "hedge_price",
@@ -394,6 +401,8 @@ def write_edges_csv(edges, cfg):
             row = dict(e)
             row["edge_pct"] = round(row["edge_pct"] * 100, 2)
             row["edge_vs_consensus"] = round(row["edge_vs_consensus"] * 100, 2)
+            if row.get("novig_hold") is not None:
+                row["novig_hold"] = round(row["novig_hold"] * 100, 2)
             writer.writerow(row)
     print(f"\nWrote {len(edges)} edges to {path}")
 

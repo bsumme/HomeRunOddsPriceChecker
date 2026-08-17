@@ -21,7 +21,7 @@ st.set_page_config(page_title="MLB Bet Finder", page_icon="⚾", layout="wide")
 
 # Bump this whenever you push a change - it shows in the caption so you can tell from your
 # phone whether Streamlit Cloud has redeployed the latest code.
-APP_VERSION = "v3 · ProgressColumn"
+APP_VERSION = "v4 · Novig hold%"
 
 
 def _secret(name, default=""):
@@ -138,6 +138,7 @@ if res:
                 f"Novig {res['opp']}": of.format_odds(e["novig_opp_price"]),
                 "Consensus": of.format_odds(e["market_consensus_price"]),
                 "Edge %": round(e["edge_vs_consensus"] * 100, 1),
+                "Hold %": round(e["novig_hold"] * 100, 1) if e.get("novig_hold") is not None else None,
                 "#Beat": f"{e['n_books_better']}/{e['n_other_books']}",
                 f"DK/FD {res['opp']}": hedge,
                 f"Fair {res['opp']}": of.format_odds(fair_opp),
@@ -154,9 +155,14 @@ if res:
                 "Odds": st.column_config.LinkColumn("Odds", display_text="check"),
                 "Edge %": st.column_config.ProgressColumn(
                     "Edge %", format="%.1f%%", min_value=0.0, max_value=edge_max),
+                "Hold %": st.column_config.NumberColumn(
+                    "Hold %", format="%.1f%%",
+                    help="Novig's two-way margin on this market — a liquidity/tightness proxy. "
+                         "Lower or negative = tighter & more active (better to arb); higher = thin."),
             },
         )
         st.caption(f"Back **{res['side']}** on Novig; check **{res['opp']}** on DK/FanDuel (tap 'check') "
-                   f"and apply a boost. 'Fair {res['opp']}' is the number your boosted price should beat.")
+                   f"and apply a boost. 'Fair {res['opp']}' is the number your boosted price should beat. "
+                   f"'Hold %' is Novig's two-way margin — lower = tighter/more liquid (not dollar depth).")
 else:
     st.caption("Pick a market and tap **Run scan** to pull today's spots. The scan is the only thing that spends credits.")
