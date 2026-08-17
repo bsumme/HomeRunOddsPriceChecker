@@ -141,12 +141,16 @@ if res:
                 "Odds": of.player_search_url(e["player"], res["cfg_name"]),
             })
         df = pd.DataFrame(rows)
-        styler = df.style.background_gradient(subset=["Edge %"], cmap="Greens").format({"Edge %": "{:.1f}%"})
+        edge_max = max(6.0, float(df["Edge %"].max()))
         st.dataframe(
-            styler,
+            df,
             use_container_width=True,
             hide_index=True,
-            column_config={"Odds": st.column_config.LinkColumn("Odds", display_text="check")},
+            column_config={
+                "Odds": st.column_config.LinkColumn("Odds", display_text="check"),
+                "Edge %": st.column_config.ProgressColumn(
+                    "Edge %", format="%.1f%%", min_value=0.0, max_value=edge_max),
+            },
         )
         st.caption(f"Back **{res['side']}** on Novig; check **{res['opp']}** on DK/FanDuel (tap 'check') "
                    f"and apply a boost. 'Fair {res['opp']}' is the number your boosted price should beat.")
