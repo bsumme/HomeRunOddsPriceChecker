@@ -21,7 +21,7 @@ st.set_page_config(page_title="MLB Bet Finder", page_icon="⚾", layout="wide")
 
 # Bump this whenever you push a change - it shows in the caption so you can tell from your
 # phone whether Streamlit Cloud has redeployed the latest code.
-APP_VERSION = "v4 · Novig hold%"
+APP_VERSION = "v5 · hold next to Novig"
 
 
 def _secret(name, default=""):
@@ -136,9 +136,9 @@ if res:
                 "Line": e["label"],
                 f"Novig {res['side']}": of.format_odds(e["novig_price"]),
                 f"Novig {res['opp']}": of.format_odds(e["novig_opp_price"]),
+                "Hold %": round(e["novig_hold"] * 100, 1) if e.get("novig_hold") is not None else None,
                 "Consensus": of.format_odds(e["market_consensus_price"]),
                 "Edge %": round(e["edge_vs_consensus"] * 100, 1),
-                "Hold %": round(e["novig_hold"] * 100, 1) if e.get("novig_hold") is not None else None,
                 "#Beat": f"{e['n_books_better']}/{e['n_other_books']}",
                 f"DK/FD {res['opp']}": hedge,
                 f"Fair {res['opp']}": of.format_odds(fair_opp),
