@@ -53,9 +53,12 @@ class MarketConfig:
     key: str                       # Odds API market key, e.g. "pitcher_strikeouts"
     name: str                      # human name, e.g. "Pitcher Strikeouts"
     slug: str                      # short id for filenames, e.g. "k"
-    sport: str = "baseball_mlb"    # Odds API sport key, e.g. "basketball_wnba"
+    sport: str = "baseball_mlb"    # Odds API sport key, or a tour prefix like "tennis_atp"
+                                   # that auto-resolves to the active tournament at run time
     regions: str = REGIONS         # billed as markets x regions per game - fewer = cheaper
     subject: str = "Player"        # table header word: "Batter" / "Pitcher"
+    moneyline: bool = False        # True for 2-way match-winner (h2h) markets, e.g. tennis:
+                                   # outcomes are participants, not Over/Under
     your_side: str = "Under"       # side you back on Novig
     price_range: tuple | None = None      # (low, high) American-odds band on Novig's price, or None
     min_edge: float = 0.02         # min fraction Novig must beat consensus by
@@ -115,6 +118,24 @@ MARKETS = {
         dk_url="https://sportsbook.draftkings.com/leagues/basketball/wnba?category=player-points",
         fd_url="https://sportsbook.fanduel.com/navigation/wnba?tab=player-points",
     ),
+    # Tennis: Novig only quotes the match winner (h2h), a 2-way moneyline - not Over/Under.
+    # sport auto-resolves to the active ATP/WTA tournament each week. Minimal mode: flags where
+    # Novig's price on a player beats the market consensus (back that player; boost the opponent
+    # on DK/FD). your_side="ML" is the moneyline marker used by the filters.
+    "tennis_atp": MarketConfig(
+        key="h2h", name="ATP Match Winner", slug="atp", sport="tennis_atp",
+        subject="Player", moneyline=True, your_side="ML", regions="us_ex,us2",
+        price_range=None, min_edge=0.02, min_books_on_line=3,
+        dk_url="https://sportsbook.draftkings.com/leagues/tennis/atp",
+        fd_url="https://sportsbook.fanduel.com/navigation/tennis",
+    ),
+    "tennis_wta": MarketConfig(
+        key="h2h", name="WTA Match Winner", slug="wta", sport="tennis_wta",
+        subject="Player", moneyline=True, your_side="ML", regions="us_ex,us2",
+        price_range=None, min_edge=0.02, min_books_on_line=3,
+        dk_url="https://sportsbook.draftkings.com/leagues/tennis/wta",
+        fd_url="https://sportsbook.fanduel.com/navigation/tennis",
+    ),
 }
 
 
@@ -173,6 +194,24 @@ def player_search_url(player, market_name):
 # ---------------------------------------------------------------------------
 # API
 # ---------------------------------------------------------------------------
+def resolve_sport(sport):
+    """
+    Tennis sport keys are per-tournament and change weekly. If `sport` is a tour prefix
+    like "tennis_atp" / "tennis_wta", query the (free) /sports list and return the first
+    ACTIVE tournament key for that tour. Otherwise return `sport` unchanged.
+    """
+    if sport in ("tennis_atp", "tennis_wta"):
+        try:
+            r = requests.get(f"{BASE_URL}/sports", params={"apiKey": API_KEY})
+            r.raise_for_status()
+            active = [s["key"] for s in r.json()
+                      if s.get("active") and s.get("key", "").startswith(sport)]
+            return active[0] if active else None
+        except requests.RequestException:
+            return None
+    return sport
+
+
 def get_events(cfg):
     """Get today's events for cfg.sport. (Free - doesn't cost quota.) Returns (events, remaining)."""
     url = f"{BASE_URL}/sports/{cfg.sport}/events"
@@ -223,11 +262,16 @@ def extract_edges(cfg, event_data, verbose=False):
             if market["key"] != cfg.key:
                 continue
             for outcome in market.get("outcomes", []):
-                player = outcome.get("description", outcome.get("name", "Unknown"))
-                side = outcome.get("name", "")
                 price = outcome.get("price")
-                point = outcome.get("point")
-                label = f"{side} {point}" if point is not None else side
+                if cfg.moneyline:
+                    # 2-way match winner: the outcome name IS the participant; no Over/Under.
+                    player = outcome.get("name", "Unknown")
+                    label = "ML"
+                else:
+                    player = outcome.get("description", outcome.get("name", "Unknown"))
+                    side = outcome.get("name", "")
+                    point = outcome.get("point")
+                    label = f"{side} {point}" if point is not None else side
                 player_odds.setdefault(player, {}).setdefault(bm_title, {})[label] = price
 
     if not player_odds:
@@ -359,7 +403,8 @@ def print_value_spots(spots, cfg, top_n=25):
     if not spots:
         print(f"\nNo Novig value spots found on {cfg.name} {cfg.your_side} matching the filters.")
         return
-    opp = opposite_label(f"{cfg.your_side} 0.5").split(" ")[0]
+    _opp_lbl = opposite_label(f"{cfg.your_side} 0.5")
+    opp = _opp_lbl.split(" ")[0] if _opp_lbl else "Opp"
     print(f"\n{'='*112}")
     print(f"  TOP NOVIG VALUE SPOTS — {cfg.name} {cfg.your_side} (Novig beats consensus; back it on Novig)")
     print(f"{'='*112}")
@@ -411,7 +456,8 @@ def write_html_report(spots, cfg, total_remaining=None, auto_open=True):
     """Render the value spots as a slick, self-contained, auto-opening HTML report."""
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     side = cfg.your_side
-    opp = opposite_label(f"{side} 0.5").split(" ")[0]
+    _opp_lbl = opposite_label(f"{side} 0.5")
+    opp = _opp_lbl.split(" ")[0] if _opp_lbl else "Opp"
     path = f"{cfg.slug}_report.html"
 
     rows_html = []
@@ -523,6 +569,15 @@ def run(cfg, top_n=25, auto_open=True, verbose=False):
     if API_KEY == "YOUR_API_KEY_HERE":
         print("\nERROR: set your key first:  $env:ODDS_API_KEY=\"...\"  (PowerShell)")
         return []
+
+    # Resolve tour prefixes (e.g. "tennis_atp") to the active tournament key.
+    resolved = resolve_sport(cfg.sport)
+    if resolved is None:
+        print(f"No active tournament found for {cfg.sport}.")
+        return []
+    if resolved != cfg.sport:
+        print(f"Active tournament: {resolved}")
+        cfg = replace(cfg, sport=resolved)
 
     events, remaining = get_events(cfg)
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")

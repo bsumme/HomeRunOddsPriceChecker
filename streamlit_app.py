@@ -21,7 +21,7 @@ st.set_page_config(page_title="MLB Bet Finder", page_icon="⚾", layout="wide")
 
 # Bump this whenever you push a change - it shows in the caption so you can tell from your
 # phone whether Streamlit Cloud has redeployed the latest code.
-APP_VERSION = "v6 · HR band -800..-200"
+APP_VERSION = "v7 · tennis (ATP/WTA moneyline)"
 
 
 def _secret(name, default=""):
@@ -60,14 +60,31 @@ market_name = st.selectbox("Market", names, index=names.index("home_runs") if "h
 base_cfg = of.MARKETS[market_name]
 
 with st.expander("Filters"):
-    side = st.radio("Side to back on Novig", ["Under", "Over"],
-                    index=0 if base_cfg.your_side == "Under" else 1, horizontal=True)
+    if base_cfg.moneyline:
+        st.caption("Match-winner (moneyline) market — back the player on Novig; boost the opponent on DK/FD.")
+        side = base_cfg.your_side  # "ML" — no Over/Under choice for a 2-way market
+    else:
+        side = st.radio("Side to back on Novig", ["Under", "Over"],
+                        index=0 if base_cfg.your_side == "Under" else 1, horizontal=True)
     min_edge = st.slider("Min edge vs. consensus (%)", 0.0, 10.0, float(base_cfg.min_edge * 100), 0.5)
     min_books = st.slider("Min other books on the line", 1, 12, base_cfg.min_books_on_line)
     top_n = st.slider("Max rows", 5, 60, 25)
 
 cfg = replace(base_cfg, your_side=side, min_edge=min_edge / 100.0, min_books_on_line=min_books)
-opp = "Over" if side == "Under" else "Under"
+opp = "Opp" if base_cfg.moneyline else ("Over" if side == "Under" else "Under")
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def cached_resolve(sport, key):
+    """Resolve a tour prefix (e.g. 'tennis_atp') to the active tournament key. Free call."""
+    return of.resolve_sport(sport)
+
+
+resolved_sport = cached_resolve(cfg.sport, of.API_KEY)
+if resolved_sport is None:
+    st.warning(f"No active tournament for {cfg.sport} right now — check back during a tournament.")
+    st.stop()
+cfg = replace(cfg, sport=resolved_sport)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
