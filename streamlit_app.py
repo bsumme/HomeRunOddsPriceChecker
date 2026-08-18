@@ -21,7 +21,7 @@ st.set_page_config(page_title="MLB Bet Finder", page_icon="⚾", layout="wide")
 
 # Bump this whenever you push a change - it shows in the caption so you can tell from your
 # phone whether Streamlit Cloud has redeployed the latest code.
-APP_VERSION = "v5 · hold next to Novig"
+APP_VERSION = "v6 · HR band -800..-200"
 
 
 def _secret(name, default=""):

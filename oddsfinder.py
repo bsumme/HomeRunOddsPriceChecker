@@ -75,7 +75,7 @@ MARKETS = {
         # HALF the credit cost of the full 4-region set. DK/FD don't carry HR props anyway, and
         # us2 already includes Pinnacle-free but plenty of books, so nothing we use is lost.
         regions="us_ex,us2",
-        your_side="Under", price_range=(-550, -300), min_edge=0.015, min_books_on_line=3,
+        your_side="Under", price_range=(-800, -200), min_edge=0.015, min_books_on_line=3,
         dk_url="https://sportsbook.draftkings.com/leagues/baseball/mlb?category=batter-props&subcategory=home-runs",
         fd_url="https://sportsbook.fanduel.com/navigation/mlb?tab=player-props",
     ),
