@@ -21,7 +21,7 @@ st.set_page_config(page_title="MLB Bet Finder", page_icon="⚾", layout="wide")
 
 # Bump this whenever you push a change - it shows in the caption so you can tell from your
 # phone whether Streamlit Cloud has redeployed the latest code.
-APP_VERSION = "v7 · tennis (ATP/WTA moneyline)"
+APP_VERSION = "v8 · % → American converter"
 
 
 def _secret(name, default=""):
@@ -49,6 +49,14 @@ if _pw:
 
 st.title("⚾ MLB Bet Finder")
 st.caption(f"Novig value spots vs. the market consensus — back the side on Novig where Novig beats the field.  ·  build **{APP_VERSION}**")
+
+# --- quick converter: Novig now prices in implied % — turn it into American odds ---
+with st.expander("🔁 Convert Novig % → American odds"):
+    c1, c2, c3 = st.columns(3)
+    pct = c1.number_input("Novig implied %", min_value=0.1, max_value=99.9, value=50.0, step=0.5)
+    p = pct / 100.0
+    c2.metric("American", of.format_odds(of.american_from_prob(p)))
+    c3.metric("Decimal", round(1 / p, 3))
 
 if not of.API_KEY or of.API_KEY == "YOUR_API_KEY_HERE":
     st.error("No API key configured. Add ODDS_API_KEY in the app's Secrets (or ODDS_API_KEY env var locally).")
