@@ -61,10 +61,13 @@ class MarketConfig:
                                    # outcomes are participants, not Over/Under
     days_ahead: int = 0            # scan window: 0 = today's games only (daily sports);
                                    # e.g. 5 for weekly sports like NFL to catch the slate
-    your_side: str = "Under"       # side you back on Novig
-    price_range: tuple | None = None      # (low, high) American-odds band on Novig's price, or None
-    min_edge: float = 0.02         # min fraction Novig must beat consensus by
+    your_side: str = "Under"       # side you back on the value book
+    price_range: tuple | None = None      # (low, high) American-odds band on the value price, or None
+    min_edge: float = 0.02         # min fraction the value book must beat consensus by
     min_books_on_line: int = 4     # min OTHER books on the same exact line to trust the consensus
+    # Exchanges to treat as the "value book," in priority order. Per player we use the first one
+    # present. Lets NFL fall back to ProphetX/Polymarket when Novig isn't syndicated for a game.
+    value_books: list = field(default_factory=lambda: ["Novig"])
     hedge_books: list = field(default_factory=lambda: ["DraftKings", "FanDuel"])
     dk_url: str = "https://sportsbook.draftkings.com/leagues/baseball/mlb?category=batter-props"
     fd_url: str = "https://sportsbook.fanduel.com/navigation/mlb?tab=player-props"
@@ -145,6 +148,7 @@ MARKETS = {
     "nfl_td": MarketConfig(
         key="player_anytime_td", name="NFL Anytime TD", slug="nfltd",
         sport="americanfootball_nfl", subject="Player", regions="us_ex,us2",
+        value_books=["Novig", "ProphetX", "Polymarket"],
         your_side="No", price_range=None, min_edge=0.02, min_books_on_line=3, days_ahead=5,
         dk_url="https://sportsbook.draftkings.com/leagues/football/nfl?category=td-scorer",
         fd_url="https://sportsbook.fanduel.com/navigation/nfl?tab=touchdown-scorer",
@@ -299,14 +303,16 @@ def extract_edges(cfg, event_data, verbose=False):
 
     edges = []
     for player, bm_data in player_odds.items():
-        novig_lines = bm_data.get("Novig")
-        if not novig_lines:
+        # Pick the value book: first of cfg.value_books this player is quoted by (Novig first).
+        value_book = next((b for b in cfg.value_books if b in bm_data), None)
+        if value_book is None:
             continue
+        novig_lines = bm_data[value_book]
         for label, novig_price in novig_lines.items():
             other_prices = [
                 (book, lines[label])
                 for book, lines in bm_data.items()
-                if book != "Novig" and label in lines
+                if book != value_book and label in lines
             ]
             if not other_prices:
                 continue
@@ -352,6 +358,7 @@ def extract_edges(cfg, event_data, verbose=False):
                 "player": player,
                 "label": label,
                 "side": side,
+                "value_book": value_book,
                 "novig_price": novig_price,
                 "novig_opp_price": novig_opp_price,
                 "novig_hold": novig_hold,
@@ -422,18 +429,22 @@ def print_value_spots(spots, cfg, top_n=25):
         return
     _opp_lbl = opposite_label(f"{cfg.your_side} 0.5")
     opp = _opp_lbl.split(" ")[0] if _opp_lbl else "Opp"
-    print(f"\n{'='*112}")
-    print(f"  TOP NOVIG VALUE SPOTS — {cfg.name} {cfg.your_side} (Novig beats consensus; back it on Novig)")
-    print(f"{'='*112}")
-    header = (f"  {cfg.subject + ' / Line':<32}{'Novig ' + cfg.your_side[0]:<9}{'Novig ' + opp[0]:<9}"
+    multi = len(cfg.value_books) > 1
+    val = "Exch" if multi else cfg.value_books[0]  # column label for the value price
+    book_col = f"{'Book':<10}" if multi else ""
+    print(f"\n{'='*118}")
+    print(f"  TOP VALUE SPOTS — {cfg.name} {cfg.your_side} ({val} beats consensus; back it there)")
+    print(f"{'='*118}")
+    header = (f"  {cfg.subject + ' / Line':<32}{book_col}{val + ' ' + cfg.your_side[0]:<9}{val + ' ' + opp[0]:<9}"
               f"{'Consensus':<11}{'Edge%':<8}{'#Beat':<7}{'DK/FD ' + opp:<12}{'Game'}")
     print(header)
-    print(f"  {'-'*32}{'-'*9}{'-'*9}{'-'*11}{'-'*8}{'-'*7}{'-'*12}{'-'*22}")
+    print(f"  {'-'*(32 + (10 if multi else 0))}{'-'*9}{'-'*9}{'-'*11}{'-'*8}{'-'*7}{'-'*12}{'-'*22}")
     for e in spots[:top_n]:
         hedge = (f"{format_odds(e['hedge_price'])} {e['hedge_book'][:2]}"
                  if e.get("hedge_price") is not None else "-")
+        book_cell = f"{e['value_book']:<10}" if multi else ""
         print(
-            f"  {e['player'] + ' ' + e['label']:<32}"
+            f"  {e['player'] + ' ' + e['label']:<32}{book_cell}"
             f"{format_odds(e['novig_price']):<9}"
             f"{format_odds(e['novig_opp_price']):<9}"
             f"{format_odds(e['market_consensus_price']):<11}"
@@ -451,7 +462,8 @@ def write_edges_csv(edges, cfg):
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
     path = f"novig_{cfg.slug}_edges_{stamp}.csv"
     fieldnames = [
-        "game", "player", "label", "side", "novig_price", "novig_opp_price", "novig_hold",
+        "game", "player", "label", "side", "value_book",
+        "novig_price", "novig_opp_price", "novig_hold",
         "market_consensus_price", "market_best_book", "market_best_price",
         "edge_pct", "edge_vs_consensus", "n_books_better", "n_other_books",
         "hedge_book", "hedge_price",
@@ -475,6 +487,8 @@ def write_html_report(spots, cfg, total_remaining=None, auto_open=True):
     side = cfg.your_side
     _opp_lbl = opposite_label(f"{side} 0.5")
     opp = _opp_lbl.split(" ")[0] if _opp_lbl else "Opp"
+    multi = len(cfg.value_books) > 1
+    val = "Exch" if multi else cfg.value_books[0]  # value-price column label
     path = f"{cfg.slug}_report.html"
 
     rows_html = []
@@ -487,12 +501,13 @@ def write_html_report(spots, cfg, total_remaining=None, auto_open=True):
         hedge = format_odds(e["hedge_price"]) if e.get("hedge_price") is not None else "—"
         hedge_book = (f' <span class="book">{html.escape(e["hedge_book"])}</span>'
                       if e.get("hedge_book") else "")
+        book_cell = f'<td class="num"><span class="book">{html.escape(e["value_book"])}</span></td>' if multi else ""
         rows_html.append(f"""
       <tr>
         <td class="rank">{i}</td>
         <td class="player"><a href="{player_search_url(e['player'], cfg.name)}" target="_blank" rel="noopener">{html.escape(e['player'])}</a>
             <span class="line">{html.escape(e['label'])}</span></td>
-        <td class="game">{html.escape(e['game'])}</td>
+        <td class="game">{html.escape(e['game'])}</td>{book_cell}
         <td class="num novig">{format_odds(e['novig_price'])}</td>
         <td class="num novigopp">{format_odds(e['novig_opp_price'])}</td>
         <td class="num">{format_odds(e['market_consensus_price'])}</td>
@@ -501,8 +516,9 @@ def write_html_report(spots, cfg, total_remaining=None, auto_open=True):
         <td class="num hedge">{hedge}{hedge_book}</td>
         <td class="num fair">{format_odds(fair_opp)}</td>
       </tr>""")
+    colspan = 11 if multi else 10
     if not rows_html:
-        rows_html.append('<tr><td colspan="10" class="empty">No spots matched the current filters.</td></tr>')
+        rows_html.append(f'<tr><td colspan="{colspan}" class="empty">No spots matched the current filters.</td></tr>')
 
     doc = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -537,24 +553,23 @@ def write_html_report(spots, cfg, total_remaining=None, auto_open=True):
 </style></head>
 <body>
   <h1>{cfg.name} Bet Finder</h1>
-  <div class="sub">{stamp} &nbsp;·&nbsp; your side on Novig: <b>{side}</b> &nbsp;·&nbsp; {len(spots)} spots &nbsp;·&nbsp; API quota left: {total_remaining or 'n/a'}</div>
+  <div class="sub">{stamp} &nbsp;·&nbsp; value book(s): <b>{', '.join(cfg.value_books)}</b> &nbsp;·&nbsp; your side: <b>{side}</b> &nbsp;·&nbsp; {len(spots)} spots &nbsp;·&nbsp; API quota left: {total_remaining or 'n/a'}</div>
   <div class="bar">
     <a class="btn dk" href="{cfg.dk_url}" target="_blank" rel="noopener">▸ Open DraftKings board</a>
     <a class="btn fd" href="{cfg.fd_url}" target="_blank" rel="noopener">▸ Open FanDuel board</a>
   </div>
   <div class="note">
-    Spots where <b>Novig's {side} price beats the market consensus</b> on the same line — Novig is the value side, so
-    <b>back {side} on Novig</b> at the best available price. <b>DK/FD {opp}</b> is DraftKings/FanDuel's live price on the
-    opposite side (their actual hedge price; blank if they don't carry this market). Bet the <b>{opp}</b> there — ideally
+    Spots where the <b>{val} {side} price beats the market consensus</b> on the same line — the exchange is the value side, so
+    <b>back {side} there</b> at the best available price{' (Book column shows which exchange)' if multi else ''}. <b>DK/FD {opp}</b> is DraftKings/FanDuel's live price on the
+    opposite side (their hedge price; blank if they don't carry it). Bet the <b>{opp}</b> there — ideally
     with a <b>boost</b> on top (boosts aren't in any feed, check in-app). <b>Fair {opp}</b> is the consensus {opp} price;
-    your boosted DK/FD {opp} should beat it for a clean arb. <b>Edge</b> = how much more Novig pays vs <b>Consensus</b>
-    (median of the other books on that line, robust to one outlier). <b>#Beat</b> = other books pricing {side} better
-    than Novig (lower is better).
+    your boosted DK/FD {opp} should beat it for a clean arb. <b>Edge</b> = how much more the value book pays vs <b>Consensus</b>
+    (median of the other books on that line). <b>#Beat</b> = other books pricing {side} better (lower is better).
   </div>
   <table>
     <thead><tr>
-      <th>#</th><th>{cfg.subject} / Line</th><th>Game</th>
-      <th class="num">Novig {side}</th><th class="num">Novig {opp}</th><th class="num">Consensus</th>
+      <th>#</th><th>{cfg.subject} / Line</th><th>Game</th>{'<th class="num">Book</th>' if multi else ''}
+      <th class="num">{val} {side}</th><th class="num">{val} {opp}</th><th class="num">Consensus</th>
       <th class="num">Edge</th><th class="num">#Beat</th><th class="num">DK/FD {opp}</th><th class="num">Fair {opp}</th>
     </tr></thead>
     <tbody>{''.join(rows_html)}

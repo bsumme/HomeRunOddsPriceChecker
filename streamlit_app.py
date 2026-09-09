@@ -21,7 +21,7 @@ st.set_page_config(page_title="MLB Bet Finder", page_icon="⚾", layout="wide")
 
 # Bump this whenever you push a change - it shows in the caption so you can tell from your
 # phone whether Streamlit Cloud has redeployed the latest code.
-APP_VERSION = "v9 · NFL anytime TD"
+APP_VERSION = "v10 · exchange fallback (Novig→ProphetX→Polymarket)"
 
 
 def _secret(name, default=""):
@@ -142,6 +142,8 @@ if run:
         "remaining": live_remaining,
         "when": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         "cfg_name": cfg.name, "side": side, "opp": opp,
+        "multi": len(cfg.value_books) > 1,
+        "val": "Exch" if len(cfg.value_books) > 1 else cfg.value_books[0],
     }
 
 # --- render last result ---
@@ -153,6 +155,7 @@ if res:
     if not spots:
         st.warning("No value spots matched the filters this run.")
     else:
+        val = res.get("val", "Novig")
         rows = []
         for e in spots[:top_n]:
             cons_prob = of.implied_prob(e["market_consensus_price"])
@@ -160,11 +163,12 @@ if res:
             hedge = of.format_odds(e["hedge_price"]) if e.get("hedge_price") is not None else "—"
             if e.get("hedge_book"):
                 hedge += f" {e['hedge_book']}"
-            rows.append({
-                "Player": e["player"],
-                "Line": e["label"],
-                f"Novig {res['side']}": of.format_odds(e["novig_price"]),
-                f"Novig {res['opp']}": of.format_odds(e["novig_opp_price"]),
+            row = {"Player": e["player"], "Line": e["label"]}
+            if res.get("multi"):
+                row["Book"] = e.get("value_book", "")
+            row.update({
+                f"{val} {res['side']}": of.format_odds(e["novig_price"]),
+                f"{val} {res['opp']}": of.format_odds(e["novig_opp_price"]),
                 "Hold %": round(e["novig_hold"] * 100, 1) if e.get("novig_hold") is not None else None,
                 "Consensus": of.format_odds(e["market_consensus_price"]),
                 "Edge %": round(e["edge_vs_consensus"] * 100, 1),
@@ -174,6 +178,7 @@ if res:
                 "Game": e["game"],
                 "Odds": of.player_search_url(e["player"], res["cfg_name"]),
             })
+            rows.append(row)
         df = pd.DataFrame(rows)
         edge_max = max(6.0, float(df["Edge %"].max()))
         st.dataframe(
@@ -190,8 +195,9 @@ if res:
                          "Lower or negative = tighter & more active (better to arb); higher = thin."),
             },
         )
-        st.caption(f"Back **{res['side']}** on Novig; check **{res['opp']}** on DK/FanDuel (tap 'check') "
+        _booknote = "the exchange in **Book**" if res.get("multi") else f"**{val}**"
+        st.caption(f"Back **{res['side']}** on {_booknote}; check **{res['opp']}** on DK/FanDuel (tap 'check') "
                    f"and apply a boost. 'Fair {res['opp']}' is the number your boosted price should beat. "
-                   f"'Hold %' is Novig's two-way margin — lower = tighter/more liquid (not dollar depth).")
+                   f"'Hold %' is the exchange's two-way margin — lower = tighter/more liquid (not dollar depth).")
 else:
     st.caption("Pick a market and tap **Run scan** to pull today's spots. The scan is the only thing that spends credits.")
