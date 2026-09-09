@@ -21,7 +21,7 @@ st.set_page_config(page_title="MLB Bet Finder", page_icon="⚾", layout="wide")
 
 # Bump this whenever you push a change - it shows in the caption so you can tell from your
 # phone whether Streamlit Cloud has redeployed the latest code.
-APP_VERSION = "v8 · % → American converter"
+APP_VERSION = "v9 · NFL anytime TD"
 
 
 def _secret(name, default=""):
@@ -70,16 +70,20 @@ base_cfg = of.MARKETS[market_name]
 with st.expander("Filters"):
     if base_cfg.moneyline:
         st.caption("Match-winner (moneyline) market — back the player on Novig; boost the opponent on DK/FD.")
-        side = base_cfg.your_side  # "ML" — no Over/Under choice for a 2-way market
+        side = base_cfg.your_side  # "ML" — no side choice for a 2-way market
     else:
-        side = st.radio("Side to back on Novig", ["Under", "Over"],
-                        index=0 if base_cfg.your_side == "Under" else 1, horizontal=True)
+        # sides depend on the market: Under/Over for lines, No/Yes for anytime-TD style props
+        choices = ["No", "Yes"] if base_cfg.your_side in ("Yes", "No") else ["Under", "Over"]
+        side = st.radio("Side to back on Novig", choices,
+                        index=choices.index(base_cfg.your_side) if base_cfg.your_side in choices else 0,
+                        horizontal=True)
     min_edge = st.slider("Min edge vs. consensus (%)", 0.0, 10.0, float(base_cfg.min_edge * 100), 0.5)
     min_books = st.slider("Min other books on the line", 1, 12, base_cfg.min_books_on_line)
     top_n = st.slider("Max rows", 5, 60, 25)
 
 cfg = replace(base_cfg, your_side=side, min_edge=min_edge / 100.0, min_books_on_line=min_books)
-opp = "Opp" if base_cfg.moneyline else ("Over" if side == "Under" else "Under")
+_opp_lbl = of.opposite_label(side if side in ("Yes", "No") else f"{side} 0.5")
+opp = "Opp" if base_cfg.moneyline else (_opp_lbl.split(" ")[0] if _opp_lbl else "Opp")
 
 
 @st.cache_data(ttl=600, show_spinner=False)

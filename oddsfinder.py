@@ -25,7 +25,7 @@ import statistics
 import sys
 import urllib.parse
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -59,6 +59,8 @@ class MarketConfig:
     subject: str = "Player"        # table header word: "Batter" / "Pitcher"
     moneyline: bool = False        # True for 2-way match-winner (h2h) markets, e.g. tennis:
                                    # outcomes are participants, not Over/Under
+    days_ahead: int = 0            # scan window: 0 = today's games only (daily sports);
+                                   # e.g. 5 for weekly sports like NFL to catch the slate
     your_side: str = "Under"       # side you back on Novig
     price_range: tuple | None = None      # (low, high) American-odds band on Novig's price, or None
     min_edge: float = 0.02         # min fraction Novig must beat consensus by
@@ -136,6 +138,17 @@ MARKETS = {
         dk_url="https://sportsbook.draftkings.com/leagues/tennis/wta",
         fd_url="https://sportsbook.fanduel.com/navigation/tennis",
     ),
+    # NFL anytime touchdown scorer - Yes/No per player, exactly like HR's Over/Under.
+    # Back "No" on Novig where Novig beats consensus (i.e. Novig is generous that the player
+    # WON'T score), then boost "Yes" on DK/FD. days_ahead=5 catches the weekly Thu-Mon slate;
+    # Novig only quotes some games, so expect fewer spots than a full MLB slate.
+    "nfl_td": MarketConfig(
+        key="player_anytime_td", name="NFL Anytime TD", slug="nfltd",
+        sport="americanfootball_nfl", subject="Player", regions="us_ex,us2",
+        your_side="No", price_range=None, min_edge=0.02, min_books_on_line=3, days_ahead=5,
+        dk_url="https://sportsbook.draftkings.com/leagues/football/nfl?category=td-scorer",
+        fd_url="https://sportsbook.fanduel.com/navigation/nfl?tab=touchdown-scorer",
+    ),
 }
 
 
@@ -177,11 +190,15 @@ def american_from_prob(p):
 
 
 def opposite_label(label):
-    """Return the flip-side label for a line, e.g. 'Over 0.5' -> 'Under 0.5'."""
+    """Return the flip-side label for a line, e.g. 'Over 0.5'->'Under 0.5', 'Yes'->'No'."""
     if label.startswith("Over "):
         return "Under " + label[len("Over "):]
     if label.startswith("Under "):
         return "Over " + label[len("Under "):]
+    if label == "Yes":
+        return "No"
+    if label == "No":
+        return "Yes"
     return None
 
 
@@ -580,15 +597,19 @@ def run(cfg, top_n=25, auto_open=True, verbose=False):
         cfg = replace(cfg, sport=resolved)
 
     events, remaining = get_events(cfg)
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    today_events = [e for e in events if e.get("commence_time", "").startswith(today)]
+    # Scan window: today through today+days_ahead (0 = today only). ISO date strings compare fine.
+    start = datetime.now(timezone.utc).date()
+    end = start + timedelta(days=cfg.days_ahead)
+    lo, hi = start.isoformat(), end.isoformat()
+    today_events = [e for e in events if lo <= e.get("commence_time", "")[:10] <= hi]
+    window = "today" if cfg.days_ahead == 0 else f"{lo} → {hi}"
     n_regions = len(cfg.regions.split(","))
     est_cost = len(today_events) * n_regions
-    print(f"Found {len(today_events)} games today (of {len(events)} upcoming).")
+    print(f"Found {len(today_events)} games ({window}) of {len(events)} upcoming.")
     print(f"Estimated cost: {len(today_events)} games x {n_regions} regions = ~{est_cost} credits"
           + (f"  (have {remaining})" if remaining is not None else ""))
     if not today_events:
-        print("No games today.")
+        print(f"No games in window ({window}).")
         return []
     if remaining is not None and remaining <= 0:
         print("Quota is exhausted (0 remaining) — not spending calls. Leaving any prior report intact.")
