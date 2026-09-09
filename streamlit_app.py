@@ -9,7 +9,7 @@ and an optional password gate stops others from spending your credits.
 """
 import os
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import requests
@@ -21,7 +21,7 @@ st.set_page_config(page_title="MLB Bet Finder", page_icon="⚾", layout="wide")
 
 # Bump this whenever you push a change - it shows in the caption so you can tell from your
 # phone whether Streamlit Cloud has redeployed the latest code.
-APP_VERSION = "v10 · exchange fallback (Novig→ProphetX→Polymarket)"
+APP_VERSION = "v11 · app respects scan window (NFL slate)"
 
 
 def _secret(name, default=""):
@@ -111,14 +111,18 @@ def cached_events(sport, key):
 # --- cost estimate (uses only the free events call) ---
 try:
     events, remaining = cached_events(cfg.sport, of.API_KEY)
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    todays = [e for e in events if e.get("commence_time", "").startswith(today)]
+    # scan window: today through today+days_ahead (0 = today only; e.g. 5 for weekly NFL)
+    _start = datetime.now(timezone.utc).date()
+    _end = _start + timedelta(days=cfg.days_ahead)
+    _lo, _hi = _start.isoformat(), _end.isoformat()
+    todays = [e for e in events if _lo <= e.get("commence_time", "")[:10] <= _hi]
+    window = "today" if cfg.days_ahead == 0 else f"{_lo} → {_hi}"
     n_regions = len(cfg.regions.split(","))
-    st.info(f"**{len(todays)} games today** · regions `{cfg.regions}` · "
+    st.info(f"**{len(todays)} games ({window})** · regions `{cfg.regions}` · "
             f"estimated cost **~{len(todays) * n_regions} credits** · "
             f"quota remaining **{remaining}**")
 except Exception as e:
-    st.warning(f"Couldn't load today's games: {e}")
+    st.warning(f"Couldn't load games: {e}")
     todays = []
 
 run = st.button(f"🔎 Run {cfg.name} scan", type="primary", disabled=not todays, use_container_width=True)
